@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Posts Classifier· LSTM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0c10;
+      --surface:   #111318;
+      --border:    #1e2230;
+      --border-hi: #2d3250;
+      --text:      #e8eaf2;
+      --muted:     #5a607a;
+      --accent:    #7c8cff;
+      --accent-lo: rgba(124,140,255,.12);
+      --safe:      #34d399;
+      --safe-lo:   rgba(52,211,153,.12);
+      --risk:      #f87171;
+      --risk-lo:   rgba(248,113,113,.12);
+      --warn:      #fbbf24;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      overflow-x: hidden;
+    }
+
+    /* — Background grid — */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 48px 48px;
+      opacity: .4;
+      pointer-events: none;
+    }
+
+    .page {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px 80px;
+    }
+
+    /* — Header — */
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent-lo);
+      border: 1px solid rgba(124,140,255,.3);
+      border-radius: 100px;
+      padding: 6px 16px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .badge .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:.4; transform:scale(1.4); }
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #e8eaf2 30%, var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 400;
+      letter-spacing: .01em;
+    }
+
+    /* — Card — */
+    .card {
+      width: 100%; max-width: 680px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 36px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: .6;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      background: var(--bg);
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      padding: 16px;
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    textarea::placeholder { color: var(--muted); }
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124,140,255,.15);
+    }
+
+    .char-count {
+      text-align: right;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    button#analyzeBtn {
+      margin-top: 20px;
+      width: 100%;
+      padding: 16px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      cursor: pointer;
+      transition: background .2s, transform .1s, box-shadow .2s;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+    }
+    button#analyzeBtn:hover {
+      background: #8f9fff;
+      box-shadow: 0 8px 24px rgba(124,140,255,.35);
+    }
+    button#analyzeBtn:active { transform: scale(.98); }
+    button#analyzeBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* spinner */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* — Result — */
+    #result {
+      margin-top: 28px;
+      display: none;
+      animation: fadeUp .4s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(12px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+
+    .result-box {
+      border-radius: 14px;
+      padding: 24px;
+      border: 1px solid;
+    }
+    .result-box.safe {
+      background: var(--safe-lo);
+      border-color: rgba(52,211,153,.3);
+    }
+    .result-box.risk {
+      background: var(--risk-lo);
+      border-color: rgba(248,113,113,.3);
+    }
+
+    .result-top {
+      display: flex; align-items: center; gap: 14px;
+    }
+    .result-icon {
+      font-size: 36px;
+      line-height: 1;
+    }
+    .result-label {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -.01em;
+    }
+    .result-box.safe  .result-label { color: var(--safe); }
+    .result-box.risk  .result-label { color: var(--risk); }
+
+    .result-meta {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .meta-cell {
+      background: rgba(0,0,0,.25);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .meta-cell .key {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .meta-cell .val {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .result-box.safe  .val { color: var(--safe); }
+    .result-box.risk  .val { color: var(--risk); }
+
+    /* probability bar */
+    .prob-bar-wrap {
+      margin-top: 18px;
+    }
+    .prob-bar-wrap .bar-label {
+      display: flex; justify-content: space-between;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .prob-bar-bg {
+      height: 8px;
+      background: rgba(255,255,255,.06);
+      border-radius: 100px;
+      overflow: hidden;
+    }
+    .prob-bar-fill {
+      height: 100%;
+      border-radius: 100px;
+      transition: width .8s cubic-bezier(.4,0,.2,1);
+    }
+    .result-box.safe .prob-bar-fill { background: var(--safe); }
+    .result-box.risk .prob-bar-fill { background: var(--risk); }
+
+    /* disclaimer */
+    .disclaimer {
+      margin-top: 16px;
+      padding: 12px 16px;
+      background: rgba(251,191,36,.07);
+      border: 1px solid rgba(251,191,36,.2);
+      border-radius: 10px;
+      font-size: 12px;
+      color: var(--warn);
+      line-height: 1.6;
+    }
+
+    /* — Examples — */
+    .examples {
+      width: 100%; max-width: 680px;
+      margin-top: 28px;
+    }
+    .examples-title {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .chips {
+      display: flex; flex-wrap: wrap; gap: 8px;
+    }
+    .chip {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 100px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .chip:hover {
+      border-color: var(--accent);
+      background: var(--accent-lo);
+      color: var(--accent);
+    }
+
+    /* — Footer — */
+    footer {
+      margin-top: 60px;
+      text-align: center;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="badge"><span class="dot"></span>LSTM · Binary Classifier</div>
+    <h1>Social Media Posts<br>Text Classifier</h1>
+    <p class="subtitle">Analyses text for indicators of suicidal ideation using a trained LSTM model</p>
+  </header>
+
+  <div class="card">
+    <label for="inputText">Input Text</label>
+    <textarea id="inputText" placeholder="Enter any text to analyse…" maxlength="2000"></textarea>
+    <div class="char-count"><span id="charCount">0</span> / 2000</div>
+
+    <button id="analyzeBtn" onclick="analyze()">
+      <span class="spinner" id="spinner"></span>
+      <span id="btnText">Analyse Text</span>
+    </button>
+
+    <div id="result">
+      <div class="result-box" id="resultBox">
+        <div class="result-top">
+          <div class="result-icon" id="resultIcon"></div>
+          <div class="result-label" id="resultLabel"></div>
+        </div>
+        <div class="result-meta">
+          <div class="meta-cell">
+            <div class="key">Risk Probability</div>
+            <div class="val" id="probVal">—</div>
+          </div>
+          <div class="meta-cell">
+            <div class="key">Model Confidence</div>
+            <div class="val" id="confVal">—</div>
+          </div>
+        </div>
+        <div class="prob-bar-wrap">
+          <div class="bar-label">
+            <span>Non-Suicide</span><span>Suicide</span>
+          </div>
+          <div class="prob-bar-bg">
+            <div class="prob-bar-fill" id="probBar" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="disclaimer">
+          ⚠️This model is trained on <strong>social media posts</strong> to detect suicidal ideation in online content.
+  It is intended for <strong>research and content moderation</strong> purposes only — not clinical diagnosis.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="examples">
+    <div class="examples-title">Try an example</div>
+    <div class="chips">
+      <div class="chip" onclick="fillExample(this)">Life is beautiful</div>
+      <div class="chip" onclick="fillExample(this)">Nobody understands me</div>
+      <div class="chip" onclick="fillExample(this)">I want to disappear</div>
+      <div class="chip" onclick="fillExample(this)">Everything feels pointless, I can't go on</div>
+      <div class="chip" onclick="fillExample(this)">Had a great day with friends today</div>
+      <div class="chip" onclick="fillExample(this)">I feel so alone and hopeless</div>
+    </div>
+  </div>
+
+  <footer>LSTM · Embedding(5000,128) → LSTM(64) → Dense(1,sigmoid)</footer>
+</div>
+
+<script>
+  const textarea = document.getElementById('inputText');
+  const charCount = document.getElementById('charCount');
+  textarea.addEventListener('input', () => charCount.textContent = textarea.value.length);
+
+  function fillExample(el) {
+    textarea.value = el.textContent;
+    charCount.textContent = textarea.value.length;
+    textarea.focus();
+  }
+
+  async function analyze() {
+    const text = textarea.value.trim();
+    if (!text) { textarea.focus(); return; }
+
+    const btn = document.getElementById('analyzeBtn');
+    const spinner = document.getElementById('spinner');
+    const btnText = document.getElementById('btnText');
+    const result = document.getElementById('result');
+
+    btn.disabled = true;
+    spinner.style.display = 'block';
+    btnText.textContent = 'Analysing…';
+    result.style.display = 'none';
+
+    try {
+      const res = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const box = document.getElementById('resultBox');
+      const isRisk = data.label === 'Suicide';
+
+      box.className = 'result-box ' + (isRisk ? 'risk' : 'safe');
+      document.getElementById('resultIcon').textContent = isRisk ? '⚠️' : '✅';
+      document.getElementById('resultLabel').textContent = isRisk ? 'Suicidal Indicators Detected' : 'No Suicidal Indicators';
+      document.getElementById('probVal').textContent = data.probability + '%';
+      document.getElementById('confVal').textContent = data.confidence + '%';
+
+      const bar = document.getElementById('probBar');
+      bar.style.width = '0%';
+      setTimeout(() => bar.style.width = data.probability + '%', 50);
+
+      result.style.display = 'block';
+      result.style.animation = 'none';
+      void result.offsetWidth;
+      result.style.animation = '';
+
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      spinner.style.display = 'none';
+      btnText.textContent = 'Analyse Text';
+    }
+  }
+
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) analyze();
+  });
+</script>
+</body>
+</html>
